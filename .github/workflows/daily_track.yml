@@ -1,0 +1,35 @@
+name: Daily model tracking
+
+on:
+  schedule:
+    # 每天台灣時間 18:00 執行（UTC 10:00），在 stock-system 那邊當天資料更新完之後
+    - cron: "0 10 * * *"
+  workflow_dispatch: {}   # 也可以在 GitHub 網頁上手動點「Run workflow」立即跑一次
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily pipeline (fetch -> train if due -> predict -> track)
+        env:
+          STOCK_SYSTEM_TOKEN: ${{ secrets.STOCK_SYSTEM_TOKEN }}
+        run: python -m src.run_daily
+
+      - name: Commit updated tracking db / models / state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/tracking.db data/train_state.json models/
+          git diff --cached --quiet || git commit -m "chore: daily track $(date -u +%Y-%m-%d)"
+          git push
