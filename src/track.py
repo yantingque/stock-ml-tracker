@@ -16,6 +16,7 @@ import pandas as pd
 from . import config
 from . import data as data_mod
 from . import predict as predict_mod
+from . import notify as notify_mod
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS predictions (
@@ -111,6 +112,7 @@ def run():
         return
     write_today_predictions(latest_date, results)
     backfill_actual_returns()
+    notify_mod.notify(latest_date, results)
 
 
 if __name__ == "__main__":

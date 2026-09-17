@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.0 - 2026-09-17
+
+新增 LINE 通知：`src/notify.py` 把三個模型當天的 Top10 整理成文字訊息，用 LINE
+Messaging API 的 broadcast 端點發送。刻意用**另一個獨立、新建的 LINE 官方帳號**接收，
+不會跟現有規則系統的正式通知混在一起。`track.py` 完成寫入/回填後會自動呼叫；沒有設定
+`LINE_CHANNEL_ACCESS_TOKEN` 這個 Secret 也不會讓整條流程失敗，只會印一行提醒後跳過。
+
+- 新增 `src/notify.py`（含 `python -m src.notify` 本機預覽/測試發送用的 entry point）
+- `daily_track.yml` 新增 `LINE_CHANNEL_ACCESS_TOKEN` 環境變數
+- README 新增 LINE 官方帳號 + Messaging API channel 的設定步驟
+- 已在雲端用測試資料驗證訊息格式產出正確（未設定 token 時會正確跳過、不影響其餘流程）
+
 ## v0.1.0 - 2026-09-17
 
 第一版：三模型（LightGBM、XGBoost、LSTM）正式上線每日追蹤。

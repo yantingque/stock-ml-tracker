@@ -21,9 +21,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run daily pipeline (fetch -> train if due -> predict -> track)
+      - name: Run daily pipeline (fetch -> train if due -> predict -> track -> LINE notify)
         env:
           STOCK_SYSTEM_TOKEN: ${{ secrets.STOCK_SYSTEM_TOKEN }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
         run: python -m src.run_daily
 
       - name: Commit updated tracking db / models / state

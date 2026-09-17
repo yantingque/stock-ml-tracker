@@ -22,7 +22,8 @@ src/
   train.py        # 判斷是否到了重訓時機（每20個交易日），是的話重訓三個模型
   predict.py      # 用目前存檔的模型，對最新一天的候選股票產生 Top10 預測
   track.py        # 把預測寫進 data/tracking.db，並回填之前預測、現在已知的實際報酬率
-  run_daily.py    # 每日流程的進入點：fetch → train（視情況）→ predict → track
+  notify.py       # 把三個模型的 Top10 整理成文字訊息，用 LINE Messaging API 廣播出去
+  run_daily.py    # 每日流程的進入點：fetch → train（視情況）→ predict → track → LINE 通知
 data/
   tracking.db     # 這個 repo 自己維護的追蹤資料庫（predictions 表），由 Actions 每天自動更新、commit
   train_state.json# 記錄「上次重訓是哪一天」
@@ -41,7 +42,8 @@ models/           # 最新一次訓練好的模型檔（.pkl / .pt），由 Acti
 2. **train.py**：檢查距離上次重訓過了幾個交易日，滿 20 天才會重新訓練三個模型（訓練成本低，正式環境不需要每天都重訓，這跟 `ml_lab` notebook 裡驗證過的 walk-forward 節奏一致）
 3. **predict.py**：用目前存檔的模型，對「今天」的候選股票各自產生 Top10 預測
 4. **track.py**：把今天的預測寫進 `tracking.db`；同時回填 20 個交易日前那批預測、現在已經知道的實際報酬率（`feature_panel` 的 `future_return_pct` 到那時候就會自然算出來，不需要另外自己算）
-5. 把更新後的 `tracking.db`、`train_state.json`、`models/` 自動 commit、push 回這個 repo
+5. **notify.py**：把三個模型今天的 Top10 整理成一則文字訊息，用 LINE Messaging API 的 broadcast 發出去（見下方設定說明）
+6. 把更新後的 `tracking.db`、`train_state.json`、`models/` 自動 commit、push 回這個 repo
 
 也可以在 GitHub 網頁上手動點 **Actions → Daily model tracking → Run workflow** 立即觸發一次，不用等排程時間。
 
@@ -55,6 +57,23 @@ models/           # 最新一次訓練好的模型檔（.pkl / .pt），由 Acti
 4. 產生後複製 token，貼到這個 repo 的 **Settings → Secrets and variables → Actions → New repository secret**，Name 填 `STOCK_SYSTEM_TOKEN`
 
 Token 有到期日，快到期時 GitHub 會提醒，記得回來更新。
+
+## 設定 LINE 通知（另建一個獨立的官方帳號，跟現有規則系統的 LINE Bot 分開）
+
+刻意用一個全新、獨立的 LINE 官方帳號來發這個系統的通知，不會跟現有規則系統的正式通知混在一起。
+發送方式用 LINE Messaging API 的 **broadcast**（廣播給所有加這個官方帳號好友的人），
+好處是完全不需要另外處理「取得自己的 userId」這個步驟——因為這是全新帳號，只要你自己加好友，
+broadcast 效果就等同於「只發給你」。
+
+1. 到 [LINE Developers Console](https://developers.line.biz/console/)，用你的 LINE 帳號登入
+2. 建立一個新的 Provider（或沿用現有的都可以），底下建立一個新的 **Messaging API channel**（這就是一個全新的官方帳號，跟正式系統用的那個是分開的）
+3. 填基本資料（Channel name 例如「股票ML追蹤」，icon 隨意）
+4. 建立後進到該 channel 的 **Messaging API** 分頁，把 **Auto-reply messages**、**Greeting messages** 都關掉（避免這個帳號自動回覆奇怪的訊息，我們只需要它單向發通知）
+5. 同一頁面找到 **Channel access token (long-lived)**，按 **Issue** 產生 token，複製起來
+6. 頁面上方會有加好友用的 QR code 或連結，用你自己的 LINE 掃碼/點擊加這個新官方帳號好友（只有加好友的人才收得到 broadcast，所以只加你自己就好）
+7. 把 token 貼到 `stock-ml-tracker` 的 **Settings → Secrets and variables → Actions → New repository secret**，Name 填 `LINE_CHANNEL_ACCESS_TOKEN`
+
+沒有設定這個 Secret 也沒關係，`notify.py` 會印一行提醒然後跳過，不會讓整條每日流程失敗。
 
 ## 本機測試
 
@@ -70,6 +89,11 @@ python -m src.run_daily --skip-fetch --force-train
 
 # 只想看某天的預測結果，不寫入追蹤表：
 python -m src.predict
+
+# 預覽 LINE 通知訊息長怎樣（預設不會真的發送）：
+python -m src.notify
+# 想實際測試發送效果（需先 export LINE_CHANNEL_ACCESS_TOKEN=你的token）：
+python -m src.notify --send
 ```
 
 ## 之後怎麼做比較
