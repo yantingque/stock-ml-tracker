@@ -9,6 +9,8 @@ on:
 jobs:
   track:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 讓內建的 GITHUB_TOKEN 有權限 commit/push 回這個 repo
     steps:
       - name: Checkout
         uses: actions/checkout@v4
