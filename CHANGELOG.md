@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.0 - 2026-09-17
+
+修正第一次正式排程執行時發現的問題：`stock-system` 自動發佈到 Release 的
+`stock_data.db` 只有原始表，不包含 `feature_panel`（那張表在 `ml_lab` 專案裡
+是靠手動執行 `01_feature_engineering.ipynb` 才產生的），導致 `train.py` 讀
+`feature_panel` 時噴 `no such table: feature_panel`。
+
+- 新增 `src/feature_engineering.py`，把 `01_feature_engineering.ipynb` 的特徵
+  計算邏輯整支搬過來，`run_daily.py` 在 fetch 之後、train 之前會自動重新計算
+  一次 `feature_panel`，不再依賴人工介入
+- 已在雲端用「移除 feature_panel 表、模擬 stock-system 自動發佈的原始 db」的
+  方式驗證過：重新計算耗時約 3 秒、產出列數與欄位跟原本手動跑 01 的結果一致，
+  接續的 train/predict/track 全部正常
+
 ## v0.2.0 - 2026-09-17
 
 新增 LINE 通知：`src/notify.py` 把三個模型當天的 Top10 整理成文字訊息，用 LINE

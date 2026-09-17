@@ -17,6 +17,7 @@
 src/
   config.py       # 共用設定：路徑、16個特徵欄位、模型超參數
   fetch_data.py   # 從 stock-system 抓最新 Release 的 stock_data.db
+  feature_engineering.py  # 從原始表重新計算 feature_panel（搬自 ml_lab 的 01_feature_engineering.ipynb）
   data.py         # 讀 feature_panel、組成橫斷面/序列資料
   models.py       # LightGBM/XGBoost（TimeSeriesSplit調參）、LSTM（PyTorch）訓練與存讀檔
   train.py        # 判斷是否到了重訓時機（每20個交易日），是的話重訓三個模型
@@ -38,12 +39,16 @@ models/           # 最新一次訓練好的模型檔（.pkl / .pt），由 Acti
 
 `daily_track.yml` 排程（預設每天 UTC 10:00，約台灣時間 18:00，可在檔案裡調整）會依序執行：
 
-1. **fetch_data.py**：用 `STOCK_SYSTEM_TOKEN` 這個 Secret，呼叫 GitHub API 抓 `stock-system` 最新 Release 的 `stock_data.db`
-2. **train.py**：檢查距離上次重訓過了幾個交易日，滿 20 天才會重新訓練三個模型（訓練成本低，正式環境不需要每天都重訓，這跟 `ml_lab` notebook 裡驗證過的 walk-forward 節奏一致）
-3. **predict.py**：用目前存檔的模型，對「今天」的候選股票各自產生 Top10 預測
-4. **track.py**：把今天的預測寫進 `tracking.db`；同時回填 20 個交易日前那批預測、現在已經知道的實際報酬率（`feature_panel` 的 `future_return_pct` 到那時候就會自然算出來，不需要另外自己算）
-5. **notify.py**：把三個模型今天的 Top10 整理成一則文字訊息，用 LINE Messaging API 的 broadcast 發出去（見下方設定說明）
-6. 把更新後的 `tracking.db`、`train_state.json`、`models/` 自動 commit、push 回這個 repo
+1. **fetch_data.py**：用 `STOCK_SYSTEM_TOKEN` 這個 Secret，呼叫 GitHub API 抓 `stock-system` 最新 Release 的 `stock_data.db`——**這份 db 只有原始表**（`daily_price`、`institutional`...），因為 `daily_run.py` 的每日自動化不會算 `feature_panel`
+2. **feature_engineering.py**：從這些原始表**自己重新計算一次 `feature_panel`**（邏輯逐行搬自 `ml_lab` 的 `01_feature_engineering.ipynb`），不依賴人工手動跑過 01
+3. **train.py**：檢查距離上次重訓過了幾個交易日，滿 20 天才會重新訓練三個模型（訓練成本低，正式環境不需要每天都重訓，這跟 `ml_lab` notebook 裡驗證過的 walk-forward 節奏一致）
+4. **predict.py**：用目前存檔的模型，對「今天」的候選股票各自產生 Top10 預測
+5. **track.py**：把今天的預測寫進 `tracking.db`；同時回填 20 個交易日前那批預測、現在已經知道的實際報酬率（`feature_panel` 的 `future_return_pct` 到那時候就會自然算出來，不需要另外自己算）
+6. **notify.py**：把三個模型今天的 Top10 整理成一則文字訊息，用 LINE Messaging API 的 broadcast 發出去（見下方設定說明）
+7. 把更新後的 `tracking.db`、`train_state.json`、`models/` 自動 commit、push 回這個 repo
+
+> 這個 repo 算出來的 `feature_panel` 只存在**這裡自己抓下來的那份 db 副本**裡，不會回頭去改
+> `stock-system` 的正式資料庫，兩邊完全獨立，不用擔心互相干擾。
 
 也可以在 GitHub 網頁上手動點 **Actions → Daily model tracking → Run workflow** 立即觸發一次，不用等排程時間。
 
