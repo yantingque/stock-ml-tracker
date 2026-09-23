@@ -27,12 +27,15 @@ jobs:
         env:
           STOCK_SYSTEM_TOKEN: ${{ secrets.STOCK_SYSTEM_TOKEN }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          # 沒設定這個 Secret 也沒關係：data_health.py 會印一行提醒然後跳過缺口回補/
+          # close=0 修復這兩步，不會讓整條每日流程失敗（停牌偵測不需要 FinMind，不受影響）
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: python -m src.run_daily
 
       - name: Commit updated tracking db / models / state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/tracking.db data/train_state.json models/
+          git add data/tracking.db data/train_state.json data/known_halt_windows.json models/
           git diff --cached --quiet || git commit -m "chore: daily track $(date -u +%Y-%m-%d)"
           git push

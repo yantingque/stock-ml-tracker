@@ -4,7 +4,11 @@
 目的是讓「正式追蹤系統」跟「實驗 notebook」的邏輯是同一套，
 之後如果要回頭對照結果會比較好對得起來。
 """
+import os
 from pathlib import Path
+
+# ---- FinMind（給 data_health.py 的自動缺口/close=0 修復用；沒設定就自動略過那兩步）----
+FINMIND_TOKEN = os.environ.get("FINMIND_TOKEN", "")
 
 # ---- 路徑 ----
 ROOT_DIR = Path(__file__).resolve().parent.parent

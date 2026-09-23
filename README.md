@@ -15,19 +15,23 @@
 ```
 .github/workflows/daily_track.yml   # 每天排程觸發的入口
 src/
-  config.py       # 共用設定：路徑、16個特徵欄位、模型超參數
+  config.py       # 共用設定：路徑、16個特徵欄位、模型超參數、FINMIND_TOKEN
   fetch_data.py   # 從 stock-system 抓最新 Release 的 stock_data.db
-  feature_engineering.py  # 從原始表重新計算 feature_panel（搬自 ml_lab 的 01_feature_engineering.ipynb）
+  data_health.py  # 資料品質自動健檢：缺交易日回補、停牌事件偵測、close=0/NULL 修復
+                  # （搬自 ml_lab 的 01_feature_engineering.ipynb，寫回 data/known_halt_windows.json）
+  feature_engineering.py  # 從原始表重新計算 feature_panel（搬自 ml_lab 的 01_feature_engineering.ipynb），
+                  # 並套用 known_halt_windows.json 排除受停牌污染的 label
   data.py         # 讀 feature_panel、組成橫斷面/序列資料
   models.py       # LightGBM/XGBoost（TimeSeriesSplit調參）、LSTM（PyTorch）訓練與存讀檔
   train.py        # 判斷是否到了重訓時機（每20個交易日），是的話重訓三個模型
   predict.py      # 用目前存檔的模型，對最新一天的候選股票產生 Top10 預測
   track.py        # 把預測寫進 data/tracking.db，並回填之前預測、現在已知的實際報酬率
   notify.py       # 把三個模型的 Top10 整理成文字訊息，用 LINE Messaging API 廣播出去
-  run_daily.py    # 每日流程的進入點：fetch → train（視情況）→ predict → track → LINE 通知
+  run_daily.py    # 每日流程的進入點：fetch → 資料健檢 → 重算 feature_panel → train（視情況）→ predict → track → LINE 通知
 data/
   tracking.db     # 這個 repo 自己維護的追蹤資料庫（predictions 表），由 Actions 每天自動更新、commit
   train_state.json# 記錄「上次重訓是哪一天」
+  known_halt_windows.json  # 累積偵測到的停牌/單日異常跳動排除區間，由 Actions 每天自動更新、commit
 models/           # 最新一次訓練好的模型檔（.pkl / .pt），由 Actions 每天自動更新、commit
 ```
 
@@ -40,12 +44,13 @@ models/           # 最新一次訓練好的模型檔（.pkl / .pt），由 Acti
 `daily_track.yml` 排程（預設每天 UTC 10:00，約台灣時間 18:00，可在檔案裡調整）會依序執行：
 
 1. **fetch_data.py**：用 `STOCK_SYSTEM_TOKEN` 這個 Secret，呼叫 GitHub API 抓 `stock-system` 最新 Release 的 `stock_data.db`——**這份 db 只有原始表**（`daily_price`、`institutional`...），因為 `daily_run.py` 的每日自動化不會算 `feature_panel`
-2. **feature_engineering.py**：從這些原始表**自己重新計算一次 `feature_panel`**（邏輯逐行搬自 `ml_lab` 的 `01_feature_engineering.ipynb`），不依賴人工手動跑過 01
-3. **train.py**：檢查距離上次重訓過了幾個交易日，滿 20 天才會重新訓練三個模型（訓練成本低，正式環境不需要每天都重訓，這跟 `ml_lab` notebook 裡驗證過的 walk-forward 節奏一致）
-4. **predict.py**：用目前存檔的模型，對「今天」的候選股票各自產生 Top10 預測
-5. **track.py**：把今天的預測寫進 `tracking.db`；同時回填 20 個交易日前那批預測、現在已經知道的實際報酬率（`feature_panel` 的 `future_return_pct` 到那時候就會自然算出來，不需要另外自己算）
-6. **notify.py**：把三個模型今天的 Top10 整理成一則文字訊息，用 LINE Messaging API 的 broadcast 發出去（見下方設定說明）
-7. 把更新後的 `tracking.db`、`train_state.json`、`models/` 自動 commit、push 回這個 repo
+2. **data_health.py**：資料品質自動健檢——缺交易日回補、單日異常跳動（停牌）自動偵測並寫回 `known_halt_windows.json`、close=0/NULL 資料庫層級修復（後兩步靠自己本機邏輯或 FinMind，沒設定 `FINMIND_TOKEN` 也不會讓流程失敗，只是缺口回補/close=0 修復這兩步會被跳過）
+3. **feature_engineering.py**：從這些原始表**自己重新計算一次 `feature_panel`**（邏輯逐行搬自 `ml_lab` 的 `01_feature_engineering.ipynb`），並套用上一步的 `known_halt_windows.json`，把落在排除區間內的列的 `future_return_pct` 蓋成 NaN，不依賴人工手動跑過 01
+4. **train.py**：檢查距離上次重訓過了幾個交易日，滿 20 天才會重新訓練三個模型（訓練成本低，正式環境不需要每天都重訓，這跟 `ml_lab` notebook 裡驗證過的 walk-forward 節奏一致）
+5. **predict.py**：用目前存檔的模型，對「今天」的候選股票各自產生 Top10 預測
+6. **track.py**：把今天的預測寫進 `tracking.db`；同時回填 20 個交易日前那批預測、現在已經知道的實際報酬率（`feature_panel` 的 `future_return_pct` 到那時候就會自然算出來，不需要另外自己算）
+7. **notify.py**：把三個模型今天的 Top10 整理成一則文字訊息，用 LINE Messaging API 的 broadcast 發出去（見下方設定說明）
+8. 把更新後的 `tracking.db`、`train_state.json`、`known_halt_windows.json`、`models/` 自動 commit、push 回這個 repo
 
 > 這個 repo 算出來的 `feature_panel` 只存在**這裡自己抓下來的那份 db 副本**裡，不會回頭去改
 > `stock-system` 的正式資料庫，兩邊完全獨立，不用擔心互相干擾。
@@ -62,6 +67,14 @@ models/           # 最新一次訓練好的模型檔（.pkl / .pt），由 Acti
 4. 產生後複製 token，貼到這個 repo 的 **Settings → Secrets and variables → Actions → New repository secret**，Name 填 `STOCK_SYSTEM_TOKEN`
 
 Token 有到期日，快到期時 GitHub 會提醒，記得回來更新。
+
+## 設定 FINMIND_TOKEN（選用，沒設定也不會壞）
+
+`data_health.py` 的缺交易日回補、close=0/NULL 修復這兩步需要呼叫 FinMind API 補資料，
+需要一個 FinMind token（跟 `03_專題_股票分析/code/config_template.py` 裡用的是同一種）：
+
+1. 把 token 貼到這個 repo 的 **Settings → Secrets and variables → Actions → New repository secret**，Name 填 `FINMIND_TOKEN`
+2. 沒有設定也沒關係，`data_health.py` 會印一行提醒然後跳過這兩步，不會讓整條每日流程失敗——停牌事件偵測不需要 FinMind，不受影響，還是會照常執行
 
 ## 設定 LINE 通知（另建一個獨立的官方帳號，跟現有規則系統的 LINE Bot 分開）
 

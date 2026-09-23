@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.4.0 - 2026-09-23
+
+同步 `ml_lab` 那邊 `01_feature_engineering.ipynb` 新增的三個資料品質自動健檢步驟
+（README 一直有說：01 的邏輯改了，這裡要跟著同步，這是那個承諾的第一次實踐）。
+背景：`ml_lab` 那邊一路追查「LSTM 好到不合理」的異常，先後修好了兩個獨立的根因——
+資料品質（缺交易日、停牌造成的假異常跳動、close=0/NULL）跟 walk-forward 的
+train/test 洩漏 bug。這裡的 `train.py` 因為是「用全部乾淨資料訓練一次」而不是
+`10`/`11` notebook 那種「切到日期 d」的回測迴圈，加上 `future_return_pct` 對還沒
+實現的最近 N_FORWARD 天本來就是 NaN、`load_panel_clean()` 又會 dropna，天然就沒有
+那個 train/test 洩漏問題，不用改。但資料品質這一項會直接影響到——這個 repo 是自己
+重新算一次 `feature_panel`，沒有停牌事件排除的話，`future_return_pct` 一樣會被停牌
+造成的假異常報酬率污染。
+
+- 新增 `src/data_health.py`：把 01 的三個健檢步驟（缺交易日回補、單日異常跳動/停牌
+  自動偵測、close=0/NULL 資料庫層級修復）逐行搬過來，寫回 `data/known_halt_windows.json`
+- `run_daily.py` 在 `fetch_data` 之後、`feature_engineering` 之前呼叫
+  `data_health.run_all()`
+- `feature_engineering.py` 新增套用 `known_halt_windows.json` 的步驟：把落在排除區間
+  內的列的 `future_return_pct` 蓋成 NaN（只動 label，不動特徵欄位本身，跟 01 一致）
+- `config.py` 新增 `FINMIND_TOKEN`（沒設定就自動跳過缺口回補/close=0 修復這兩步，
+  不會讓整條流程失敗；停牌偵測不需要 FinMind，不受影響）
+- `daily_track.yml` 新增 `FINMIND_TOKEN` Secret、把 `data/known_halt_windows.json`
+  加進每日自動 commit 的清單，讓排除清單能持續累積
+- 已用合成測試資料庫驗證過完整流程：缺口回補、close=0 修復（用真實 schema 的
+  `PRIMARY KEY (stock_id, date)` 驗證過 `INSERT OR REPLACE` 不會產生重複列）、
+  停牌偵測（含日曆相鄰檢查，避免把缺交易日誤判成停牌）、`feature_engineering.py`
+  正確只排除受影響區間內的 label，其餘資料不受影響
+
+### 待辦 / 下一步
+
+- 在 GitHub 上設定 `FINMIND_TOKEN` Secret（沒設定也不會壞，只是缺口回補/close=0
+  修復這兩步會被跳過）
+- 第一次正式排程執行後，檢查 `data/known_halt_windows.json` 是否正確累積、
+  commit 是否成功
+
 ## v0.3.0 - 2026-09-17
 
 修正第一次正式排程執行時發現的問題：`stock-system` 自動發佈到 Release 的

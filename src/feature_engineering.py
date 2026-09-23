@@ -9,6 +9,14 @@ feature_panel——那張表在 ml_lab 專案裡是靠手動執行 01_feature_en
 
 特徵定義、計算方式刻意跟 01_feature_engineering.ipynb 保持逐行一致，
 之後如果 01 那邊的邏輯有調整，這裡也要跟著同步修改。
+
+2026-09 更新：01 那邊新增了三個資料品質自動健檢步驟（缺交易日回補、單日異常跳動/
+停牌自動排除、close=0/NULL 修復），已同步搬進 data_health.py。實際的健檢/修復
+動作在 run_daily.py 裡於呼叫本模組之前先執行；這裡只負責套用 data_health.py
+偵測到的停牌排除區間（known_halt_windows.json），把對應列的 future_return_pct
+蓋成 NaN，避免停牌造成的假異常報酬率污染 label（這正是 ml_lab 那邊「LSTM 好到
+不合理」調查最後追出來的兩個根因之一，另一個是 walk-forward 的 train/test 洩漏，
+跟這裡的即時訓練方式無關，見 train.py 開頭的說明）。
 """
 import sqlite3
 import time
@@ -17,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 from . import config
+from . import data_health
 
 OUTPUT_TABLE = "feature_panel"
 N_FORWARD = 20  # 預測目標：未來幾個交易日後的報酬率，跟 01 一致
@@ -124,6 +133,23 @@ def build_feature_panel(db_path=None) -> int:
         groups.append(px)
 
     panel = pd.concat(groups, ignore_index=True)
+
+    # ---- 排除已知停牌/斷點事件的 label（跟 01 一致：只排除 future_return_pct，
+    # 不動特徵欄位本身；偵測本身由 data_health.detect_halt_windows() 負責，這裡只套用）----
+    halt_windows = data_health.load_halt_windows()
+    if halt_windows:
+        def _in_halt_window(row):
+            windows = halt_windows.get(row["stock_id"])
+            if not windows:
+                return False
+            for start, end in windows:
+                if pd.Timestamp(start) <= row["date"] <= pd.Timestamp(end):
+                    return True
+            return False
+        halt_mask = panel.apply(_in_halt_window, axis=1)
+        if halt_mask.any():
+            panel.loc[halt_mask, "future_return_pct"] = np.nan
+            print(f"因為停牌/斷點事件排除的列數: {int(halt_mask.sum())}")
 
     # ---- 基本面 as-of 合併 ----
     panel = panel.sort_values("date")
